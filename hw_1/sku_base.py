@@ -1,7 +1,8 @@
 from abc import abstractmethod
-
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from sklearn.metrics import mean_absolute_percentage_error
 from sklearn.model_selection import train_test_split
 
@@ -15,11 +16,16 @@ class SkuBase:
     file_name = 'Данные_по_Продажам.xlsx'
     mape_scores = []
     forecast_horizon = 8
+    # Для хранения детальной информации по каждой группе
+    group_predictions = []  # будет хранить dict с данными для графиков
 
     def run(self):
         print(f'================{self.regression_name}==============')
         df = self._init_dataframe()
         groups = df.groupby(['Контрагент Код', 'Номенклатура Код'])
+
+        self.mape_scores = []
+        self.group_predictions = []
 
         for name, group in groups:
             client_code, sku_code = name
@@ -27,12 +33,62 @@ class SkuBase:
             if len(group) < 10:
                 continue
             try:
-                X_train, X_test, y_train, y_test = self._init_train_test_set(group)
+                X_train, X_test, y_train, y_test, dates_test = self._init_train_test_set_with_dates(group)
             except TooSmallDatasetError:
                 continue
             y_pred_test = self._fit_model(X_train, y_train, X_test)
             self._show_predict(client_code, sku_code, y_test, y_pred_test)
+
+            # Сохраняем данные для построения графиков
+            self.group_predictions.append({
+                'client_code': client_code,
+                'sku_code': sku_code,
+                'y_test': y_test,
+                'y_pred_test': y_pred_test,
+                'dates': dates_test,
+                'mape': mean_absolute_percentage_error(y_test, y_pred_test) if np.sum(y_test != 0) > 0 else None
+            })
+
         self._show_final_result()
+
+    def run_with_forecast(self, forecast_weeks=10):
+        """Запуск с прогнозированием на forecast_weeks недель вперед"""
+        print(f'================{self.regression_name} - Прогнозирование==============')
+        df = self._init_dataframe()
+        groups = df.groupby(['Контрагент Код', 'Номенклатура Код'])
+
+        self.mape_scores = []
+        self.group_predictions = []
+
+        for name, group in groups:
+            client_code, sku_code = name
+
+            if len(group) < 10:
+                continue
+
+            # Обучаем на всех данных
+            X_full, y_full, dates_full = self._prepare_full_data(group)
+
+            # Создаем признаки для прогноза
+            X_future = self._create_future_features(group, forecast_weeks)
+
+            # Обучаем модель на всех данных
+            model = self._fit_model_on_full(X_full, y_full)
+
+            # Делаем прогноз
+            y_forecast = model.predict(X_future)
+
+            # Сохраняем для визуализации
+            self.group_predictions.append({
+                'client_code': client_code,
+                'sku_code': sku_code,
+                'historical_dates': dates_full,
+                'historical_sales': y_full,
+                'forecast_dates': self._get_future_dates(group, forecast_weeks),
+                'forecast_sales': y_forecast
+            })
+
+        self._plot_all_forecasts()
 
     def _init_dataframe(self):
         # 1. Базовый датафрейм продаж (как раньше)
@@ -74,9 +130,11 @@ class SkuBase:
         df_stock['Дата'] = pd.to_datetime(df_stock['Дата'], dayfirst=True)
         df_stock['Year_Week'] = df_stock['Дата'].dt.to_period('W')
         df_stock_weekly = df_stock.groupby(['Номенклатура Код', 'Year_Week'])['СрДнОстаток|Сумма'].mean().reset_index()
+        df_stock_weekly.rename(columns={'СрДнОстаток|Сумма': 'СрДнОстаток'}, inplace=True)
 
         df_weekly = df_weekly.merge(df_stock_weekly, on=['Номенклатура Код', 'Year_Week'], how='left')
-        df_weekly['СрДнОстаток|Сумма'].fillna(df_weekly['СрДнОстаток|Сумма'].median(), inplace=True)
+        median_val = df_weekly['СрДнОстаток'].median()
+        df_weekly['СрДнОстаток'] = df_weekly['СрДнОстаток'].fillna(median_val)
 
         # 5. Добавляем категориальные признаки из справочников
         df_sku_info = pd.read_excel('Справочник_товаров.xlsx')
@@ -100,6 +158,8 @@ class SkuBase:
         df_weekly = df_weekly.sort_values(['Контрагент Код', 'Номенклатура Код', 'Year_Week'])
         df_weekly['Week_Index'] = df_weekly.groupby(['Контрагент Код', 'Номенклатура Код']).cumcount()
 
+        numeric_cols = df_weekly.select_dtypes(include=[np.number]).columns
+        df_weekly[numeric_cols] = df_weekly[numeric_cols].fillna(0)
         return df_weekly
 
     # def _init_dataframe(self):
@@ -114,40 +174,135 @@ class SkuBase:
     #     df_weekly['Week_Index'] = df_weekly.groupby(['Контрагент Код', 'Номенклатура Код']).cumcount()
     #     return df_weekly
 
-    def _init_train_test_set(self, group):
+    def _add_time_series_features(self, df):
+        """Добавляет лаги и скользящие средние"""
+        # Сортировка обязательна
+        df = df.sort_values(['Контрагент Код', 'Номенклатура Код', 'Year_Week'])
+
+        group_cols = ['Контрагент Код', 'Номенклатура Код']
+        target_col = 'Количество'
+
+        # Лаги
+        for lag in [1, 2, 4, 8]:
+            df[f'lag_{lag}'] = df.groupby(group_cols)[target_col].shift(lag)
+
+        # Скользящие средние (с учетом лага 1, чтобы не было утечки)
+        for window in [4, 8, 12]:
+            df[f'roll_mean_{window}'] = df.groupby(group_cols)[target_col].transform(
+                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+            )
+
+        # Скользящее стандартное отклонение (волатильность)
+        df['roll_std_4'] = df.groupby(group_cols)[target_col].transform(
+            lambda x: x.shift(1).rolling(4, min_periods=1).std()
+        )
+
+        # Заполняем NaN, возникшие из-за лагов, нулями или медианой
+        df.fillna(0, inplace=True)
+
+        return df
+
+    def _init_train_test_set_with_dates(self, group):
+        feature_columns = self._get_feature_columns(group)
+
+        X = group[feature_columns].values
+        y = group['Количество'].values
+        dates = group['Year_Week'].dt.start_time.values
+
+        if len(X) <= 8:
+            raise TooSmallDatasetError
+
+        # Сохраняем индексы для временного разбиения
+        split_idx = len(X) - self.forecast_horizon
+
+        X_train = X[:split_idx]
+        X_test = X[split_idx:]
+        y_train = y[:split_idx]
+        y_test = y[split_idx:]
+        dates_test = dates[split_idx:]
+
+        return X_train, X_test, y_train, y_test, dates_test
+
+    def _prepare_full_data(self, group):
+        """Подготовка всех данных для обучения"""
+        feature_columns = self._get_feature_columns(group)
+        X = group[feature_columns].values
+        y = group['Количество'].values
+        dates = group['Year_Week'].dt.start_time.values
+        return X, y, dates
+
+    def _create_future_features(self, group, forecast_weeks):
+        """Создание признаков для будущих периодов"""
+        last_week = group['Year_Week'].iloc[-1]
+        last_week_start = last_week.start_time
+
+        future_dates = []
+        future_weeks = []
+
+        for i in range(1, forecast_weeks + 1):
+            future_date = last_week_start + pd.Timedelta(weeks=i)
+            future_dates.append(future_date)
+            future_weeks.append(pd.Period(future_date, freq='W'))
+
+        # Создаем DataFrame для будущих периодов
+        future_data = []
+        last_row = group.iloc[-1].copy()
+
+        for i, (future_date, future_week) in enumerate(zip(future_dates, future_weeks)):
+            new_row = last_row.copy()
+            new_row['Year_Week'] = future_week
+            new_row['Week_Index'] = last_row['Week_Index'] + i + 1
+            new_row['Месяц'] = future_date.month
+            new_row['Неделя_в_году'] = future_date.isocalendar().week
+
+            # Для цен и остатков используем последние известные значения или тренд
+            # Можно улучшить, добавив прогноз цен и акций
+
+            future_data.append(new_row)
+
+        future_df = pd.DataFrame(future_data)
+        feature_columns = self._get_feature_columns(group)
+
+        return future_df[feature_columns].values
+
+    def _get_future_dates(self, group, forecast_weeks):
+        """Получение дат для прогноза"""
+        last_week = group['Year_Week'].iloc[-1]
+        last_week_start = last_week.start_time
+
+        future_dates = []
+        for i in range(1, forecast_weeks + 1):
+            future_date = last_week_start + pd.Timedelta(weeks=i)
+            future_dates.append(future_date)
+
+        return np.array(future_dates)
+
+    def _get_feature_columns(self, group):
+        """Получение списка признаков"""
         feature_columns = [
-            'Week_Index',  # базовый временной тренд
-            'СрЦенаЗаНеделю',  # средняя цена за неделю
-            'is_promo',  # была ли акция
-            'СрДнОстаток',  # средний дневной остаток
-            'Месяц',  # месяц (для сезонности)
-            'Неделя_в_году',  # номер недели в году
+            'Week_Index',
+            'СрЦенаЗаНеделю',
+            'is_promo',
+            'СрДнОстаток',
+            'Месяц',
+            'Неделя_в_году',
+            'lag_1', 'lag_2', 'lag_4', 'lag_8',
+            'roll_mean_4', 'roll_mean_8', 'roll_mean_12',
+            'roll_std_4'
         ]
 
         # Добавляем one-hot закодированные колонки (если они есть)
         for col in group.columns:
             if col.startswith(('ТоварнаяГруппа_', 'КаналСбыта_', 'ТорговаяМарка_')):
-                feature_columns.append(col)
+                if col in group.columns:
+                    feature_columns.append(col)
 
-        # Проверяем, что все колонки существуют
-        existing_columns = [col for col in feature_columns if col in group.columns]
+        return [col for col in feature_columns if col in group.columns] or ['Week_Index']
 
-        if len(existing_columns) < 2:  # Хотя бы 2 признака
-            print(f"Предупреждение: найдено только {len(existing_columns)} признаков")
-            # Если нет дополнительных признаков, используем только Week_Index
-            existing_columns = ['Week_Index']
-
-        X = group[existing_columns].values
-        y = group['Количество'].values
-
-        if len(X) <= 8:
-            raise TooSmallDatasetError
-
-        return train_test_split(
-            X, y,
-            test_size=self.forecast_horizon,
-            # shuffle=False
-        )
+    @abstractmethod
+    def _fit_model_on_full(self, X_full, y_full):
+        """Обучение модели на всех данных"""
+        raise NotImplementedError()
 
     @abstractmethod
     def _fit_model(self, X_train, y_train, X_test):
@@ -169,3 +324,181 @@ class SkuBase:
             else:
                 print(
                     "MAPE > 25%.")
+
+    def plot_mape_distribution(self):
+        """Построение графика распределения MAPE"""
+        if not self.mape_scores:
+            print("Нет данных MAPE для отображения")
+            return
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+        # Гистограмма распределения MAPE
+        axes[0].hist(self.mape_scores, bins=20, edgecolor='black', alpha=0.7, color='steelblue')
+        axes[0].axvline(x=0.25, color='red', linestyle='--', linewidth=2, label='Порог 25%')
+        axes[0].axvline(x=np.mean(self.mape_scores), color='green', linestyle='-', linewidth=2,
+                        label=f'Среднее: {np.mean(self.mape_scores):.2%}')
+        axes[0].set_xlabel('MAPE')
+        axes[0].set_ylabel('Частота')
+        axes[0].set_title(f'{self.regression_name} - Распределение MAPE по группам')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
+
+        # Box plot
+        box_data = axes[1].boxplot(self.mape_scores, patch_artist=True)
+        box_data['boxes'][0].set_facecolor('lightblue')
+        axes[1].axhline(y=0.25, color='red', linestyle='--', linewidth=2, label='Порог 25%')
+        axes[1].set_ylabel('MAPE')
+        axes[1].set_title(f'{self.regression_name} - Box plot MAPE')
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.show()
+
+        # Дополнительная статистика
+        print(f"\nСтатистика MAPE для {self.regression_name}:")
+        print(f"  Среднее: {np.mean(self.mape_scores):.2%}")
+        print(f"  Медиана: {np.median(self.mape_scores):.2%}")
+        print(f"  Стандартное отклонение: {np.std(self.mape_scores):.2%}")
+        print(f"  Минимум: {np.min(self.mape_scores):.2%}")
+        print(f"  Максимум: {np.max(self.mape_scores):.2%}")
+        print(f"  Квартиль 25%: {np.percentile(self.mape_scores, 25):.2%}")
+        print(f"  Квартиль 75%: {np.percentile(self.mape_scores, 75):.2%}")
+        print(f"  Групп с MAPE <= 25%: {np.sum(np.array(self.mape_scores) <= 0.25)} из {len(self.mape_scores)}")
+
+    def plot_best_worst_predictions(self, n_best=3, n_worst=3):
+        """Построение графиков лучших и худших прогнозов"""
+        if not self.group_predictions:
+            print("Нет данных прогнозов для отображения")
+            return
+
+        # Фильтруем только те, у которых есть y_test и y_pred_test
+        valid_predictions = [p for p in self.group_predictions if 'y_test' in p and p.get('mape') is not None]
+
+        if not valid_predictions:
+            print("Нет валидных прогнозов для отображения")
+            return
+
+        # Сортируем по MAPE
+        sorted_preds = sorted(valid_predictions, key=lambda x: x['mape'])
+
+        best_predictions = sorted_preds[:n_best]
+        worst_predictions = sorted_preds[-n_worst:]
+
+        fig, axes = plt.subplots(2, max(n_best, n_worst), figsize=(5 * max(n_best, n_worst), 10))
+
+        # Лучшие прогнозы
+        for idx, pred in enumerate(best_predictions):
+            ax = axes[0, idx] if n_best > 1 else axes[0]
+            weeks = range(len(pred['y_test']))
+            ax.plot(weeks, pred['y_test'], 'o-', label='Факт', linewidth=2, markersize=8)
+            ax.plot(weeks, pred['y_pred_test'], 's--', label='Прогноз', linewidth=2, markersize=8)
+            ax.set_title(f"Клиент: {pred['client_code']}, SKU: {pred['sku_code']}\nMAPE: {pred['mape']:.2%}")
+            ax.set_xlabel('Недели')
+            ax.set_ylabel('Продажи')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+        # Худшие прогнозы
+        for idx, pred in enumerate(worst_predictions):
+            ax = axes[1, idx] if n_worst > 1 else axes[1]
+            weeks = range(len(pred['y_test']))
+            ax.plot(weeks, pred['y_test'], 'o-', label='Факт', linewidth=2, markersize=8, color='green')
+            ax.plot(weeks, pred['y_pred_test'], 's--', label='Прогноз', linewidth=2, markersize=8, color='red')
+            ax.set_title(f"Клиент: {pred['client_code']}, SKU: {pred['sku_code']}\nMAPE: {pred['mape']:.2%}")
+            ax.set_xlabel('Недели')
+            ax.set_ylabel('Продажи')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+
+        plt.suptitle(f'{self.regression_name} - Лучшие и худшие прогнозы', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        plt.show()
+
+    def plot_all_forecasts(self, max_groups=9):
+        """Построение прогнозов на будущее для всех групп"""
+        if not self.group_predictions or 'historical_sales' not in self.group_predictions[0]:
+            print("Нет данных прогнозов. Запустите run_with_forecast() сначала")
+            return
+
+        n_groups = min(len(self.group_predictions), max_groups)
+        n_cols = 3
+        n_rows = (n_groups + n_cols - 1) // n_cols
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 5 * n_rows))
+        axes = axes.flatten() if n_groups > 1 else [axes]
+
+        for idx in range(n_groups):
+            pred = self.group_predictions[idx]
+            ax = axes[idx]
+
+            # Исторические данные (последние 52 недели = год)
+            hist_dates = pred['historical_dates'][-52:]
+            hist_sales = pred['historical_sales'][-52:]
+
+            ax.plot(hist_dates, hist_sales, 'b-o', label='Исторические продажи', linewidth=2, markersize=4)
+            ax.plot(pred['forecast_dates'], pred['forecast_sales'], 'r--s', label='Прогноз', linewidth=2, markersize=6)
+
+            # Вертикальная линия разделения
+            split_date = pred['historical_dates'][-1]
+            ax.axvline(x=split_date, color='gray', linestyle='--', alpha=0.7, label='Начало прогноза')
+
+            ax.set_title(f"Клиент: {pred['client_code']}, SKU: {pred['sku_code']}")
+            ax.set_xlabel('Дата')
+            ax.set_ylabel('Продажи')
+            ax.legend(loc='best')
+            ax.grid(True, alpha=0.3)
+
+            # Форматирование дат
+            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+
+        # Скрыть лишние подграфики
+        for idx in range(n_groups, len(axes)):
+            axes[idx].set_visible(False)
+
+        plt.suptitle(f'{self.regression_name} - Прогноз продаж на 2.5 месяца', fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        plt.show()
+
+
+def compare_models(models):
+    """Сравнение нескольких моделей"""
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    model_names = []
+    avg_mapes = []
+
+    for model in models:
+        if model.mape_scores:
+            model_names.append(model.regression_name)
+            avg_mapes.append(np.mean(model.mape_scores))
+
+    # Столбчатая диаграмма
+    bars = axes[0].bar(model_names, avg_mapes, color=['steelblue', 'forestgreen', 'coral'])
+    axes[0].axhline(y=0.25, color='red', linestyle='--', linewidth=2, label='Порог 25%')
+    axes[0].set_ylabel('Средний MAPE')
+    axes[0].set_title('Сравнение среднего MAPE моделей')
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3)
+
+    # Добавление значений на столбцы
+    for bar, value in zip(bars, avg_mapes):
+        axes[0].text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                     f'{value:.2%}', ha='center', va='bottom', fontweight='bold')
+
+    # Box plot для сравнения
+    mape_lists = [model.mape_scores for model in models if model.mape_scores]
+    bp = axes[1].boxplot(mape_lists, labels=model_names, patch_artist=True)
+    for patch in bp['boxes']:
+        patch.set_facecolor('lightblue')
+    axes[1].axhline(y=0.25, color='red', linestyle='--', linewidth=2, label='Порог 25%')
+    axes[1].set_ylabel('MAPE')
+    axes[1].set_title('Сравнение распределения MAPE моделей')
+    axes[1].legend()
+    axes[1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
