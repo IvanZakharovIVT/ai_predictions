@@ -169,32 +169,3 @@ class SkuBase:
             else:
                 print(
                     "MAPE > 25%.")
-
-
-class SKUAIBase(SkuBase):
-    predictions_list = []
-    forecast_horizon = 8
-
-    def run(self):
-        super().run()
-        if self.predictions_list:
-            df_predictions = pd.DataFrame(self.predictions_list)
-            print("\n--- Прогноз на 2 месяца (8 недель) ---")
-            print(df_predictions.head(10))
-
-            # Сохранение в Excel
-            output_file = 'forecast_results.xlsx'
-            df_predictions.to_excel(output_file, index=False)
-            print(f"\nПрогноз сохранен в файл: {output_file}")
-
-            # Оценка общего MAPE
-            if self.mape_scores:
-                avg_mape = np.mean(self.mape_scores)
-                print(f"\nСредний MAPE по всем группам: {avg_mape:.2%}")
-                if avg_mape <= 0.25:
-                    print("Условие задачи выполнено: MAPE <= 25%")
-                else:
-                    print(
-                        "Внимание: MAPE превышает 25%. Возможно, требуется более сложная модель (например, с учетом сезонности).")
-        else:
-            print("Не удалось построить прогноз.")
