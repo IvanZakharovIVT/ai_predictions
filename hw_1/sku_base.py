@@ -32,7 +32,7 @@ class SkuBase:
         for name, group in groups:
             client_code, sku_code = name
 
-            if len(group) < 10:
+            if len(group) < 20:
                 continue
             try:
                 X_train, X_test, y_train, y_test, dates_test = self._init_train_test_set_with_dates(group)

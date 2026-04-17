@@ -32,7 +32,7 @@ class SKUForest(SkuBase):
 
     def _fit_model(self, X_train, y_train, X_test):
         rf_model = RandomForestRegressor(
-            n_estimators=100,
+            n_estimators=200,
             random_state=42,
             n_jobs=-1
         )
@@ -60,8 +60,8 @@ class SKUXGB(SkuBase):
     def _fit_model(self, X_train, y_train, X_test):
         model = xgb.XGBRegressor(
             n_estimators=100,
-            learning_rate=0.1,
-            max_depth=5,
+            learning_rate=0.05,
+            max_depth=6,
             objective='reg:squarederror',
             random_state=42,
             verbosity=0
