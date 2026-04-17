@@ -1,0 +1,4 @@
+.venv
+.idea
+/hw_1/ai_slop/*
+*.xlsx
