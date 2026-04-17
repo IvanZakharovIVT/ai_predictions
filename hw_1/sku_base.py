@@ -92,11 +92,12 @@ class SkuBase:
         # self._plot_all_forecasts()
 
     def _init_train_test_set_with_dates(self, group):
-        feature_columns = self._get_feature_columns(group)
+        group_with_features = self._create_features_for_group(group.copy())
+        feature_columns = self._add_time_series_features_proper(group_with_features)
 
-        X = group[feature_columns].values
-        y = group['Количество'].values
-        dates = group['Year_Week'].dt.start_time.values
+        X = group_with_features[feature_columns].values
+        y = group_with_features['Количество'].values
+        dates = group_with_features['Year_Week'].dt.start_time.values
 
         if len(X) <= 8:
             raise TooSmallDatasetError
@@ -112,9 +113,37 @@ class SkuBase:
 
         return X_train, X_test, y_train, y_test, dates_test
 
+    def _create_features_for_group(self, group):
+        """Создание временных признаков для конкретной группы"""
+        # Сортировка
+        group = group.sort_values('Year_Week')
+
+        target_col = 'Количество'
+
+        # Лаги
+        for lag in [1, 2, 4, 8]:
+            group[f'lag_{lag}'] = group[target_col].shift(lag)
+
+        # Скользящие средние
+        for window in [4, 8, 12]:
+            group[f'roll_mean_{window}'] = group[target_col].shift(1).rolling(window, min_periods=1).mean()
+
+        # Логарифмические признаки (важно для моделей!)
+        group['log_sales'] = np.log1p(group[target_col])
+        for lag in [1, 2, 4, 8]:
+            group[f'log_lag_{lag}'] = group['log_sales'].shift(lag)
+
+        # Скользящее стандартное отклонение
+        group['roll_std_4'] = group[target_col].shift(1).rolling(4, min_periods=1).std()
+
+        # Заполняем NaN
+        group = group.fillna(0)
+
+        return group
+
     def _prepare_full_data(self, group):
         """Подготовка всех данных для обучения"""
-        feature_columns = self._get_feature_columns(group)
+        feature_columns = self._add_time_series_features_proper(group)
         X = group[feature_columns].values
         y = group['Количество'].values
         dates = group['Year_Week'].dt.start_time.values
@@ -150,7 +179,7 @@ class SkuBase:
             future_data.append(new_row)
 
         future_df = pd.DataFrame(future_data)
-        feature_columns = self._get_feature_columns(group)
+        feature_columns = self._add_time_series_features_proper(group)
 
         return future_df[feature_columns].values
 
@@ -166,7 +195,7 @@ class SkuBase:
 
         return np.array(future_dates)
 
-    def _get_feature_columns(self, group):
+    def _add_time_series_features_proper(self, group):
         """Получение списка признаков"""
         feature_columns = [
             'Week_Index',
