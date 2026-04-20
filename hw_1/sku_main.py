@@ -57,26 +57,26 @@ if __name__ == '__main__':
     ])
 
     # ============== ЧАСТЬ 2: Прогноз на 2.5 месяца ==============
-    # print("\n" + "=" * 60)
-    # print("ЧАСТЬ 2: Прогноз на 2.5 месяца (10 недель)")
-    # print("=" * 60)
-    #
-    # # Выбираем лучшую модель по MAPE для прогнозирования
-    # models_mapes = {
-    #     'Линейная регрессия': np.mean(my_linreg.mape_scores) if my_linreg.mape_scores else float('inf'),
-    #     'Случайный лес': np.mean(my_forest.mape_scores) if my_forest.mape_scores else float('inf'),
-    #     'XGBoost': np.mean(my_xgboost.mape_scores) if my_xgboost.mape_scores else float('inf')
-    # }
-    #
-    # best_model_name = min(models_mapes, key=models_mapes.get)
-    # print(f"Лучшая модель по MAPE: {best_model_name}")
-    #
-    # # Запускаем прогнозирование для лучшей модели
+    print("\n" + "=" * 60)
+    print("ЧАСТЬ 2: Прогноз на 2.5 месяца (10 недель)")
+    print("=" * 60)
+
+    # Выбираем лучшую модель по MAPE для прогнозирования
+    models_mapes = {
+        # 'Линейная регрессия': np.mean(my_linreg.mape_scores) if my_linreg.mape_scores else float('inf'),
+        'Случайный лес': np.mean(my_forest.mape_scores) if my_forest.mape_scores else float('inf'),
+        'XGBoost': np.mean(my_xgboost.mape_scores) if my_xgboost.mape_scores else float('inf')
+    }
+
+    best_model_name = min(models_mapes, key=models_mapes.get)
+    print(f"Лучшая модель по MAPE: {best_model_name}")
+
+    # Запускаем прогнозирование для лучшей модели
     # if best_model_name == 'Линейная регрессия':
     #     best_model = my_linreg
-    # elif best_model_name == 'Случайный лес':
-    #     best_model = my_forest
-    # else:
-    #     best_model = my_xgboost
-    #
-    # best_model.run_with_forecast(forecast_weeks=10)  # 10 недель = 2.5 месяца
+    if best_model_name == 'Случайный лес':
+        best_model = my_forest
+    else:
+        best_model = my_xgboost
+
+    best_model.run_with_forecast(forecast_weeks=10)  # 10 недель = 2.5 месяца

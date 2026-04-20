@@ -74,10 +74,8 @@ class SkuBase:
             X_future = self._create_future_features(group, forecast_weeks)
 
             # Обучаем модель на всех данных
-            model = self._fit_model_on_full(X_full, y_full)
-
             # Делаем прогноз
-            y_forecast = model.predict(X_future)
+            y_forecast = self._fit_model(X_full, y_full, X_future)
 
             # Сохраняем для визуализации
             self.group_predictions.append({
@@ -89,7 +87,7 @@ class SkuBase:
                 'forecast_sales': y_forecast
             })
 
-        # self._plot_all_forecasts()
+        self._plot_all_forecasts()
 
     def _init_train_test_set_with_dates(self, group):
         group_with_features = self._create_features_for_group(group.copy())
@@ -218,11 +216,6 @@ class SkuBase:
         return [col for col in feature_columns if col in group.columns] or ['Week_Index']
 
     @abstractmethod
-    def _fit_model_on_full(self, X_full, y_full):
-        """Обучение модели на всех данных"""
-        raise NotImplementedError()
-
-    @abstractmethod
     def _fit_model(self, X_train, y_train, X_test):
         raise NotImplementedError()
 
@@ -334,50 +327,108 @@ class SkuBase:
         plt.tight_layout()
         plt.show()
 
-    def plot_all_forecasts(self, max_groups=9):
-        """Построение прогнозов на будущее для всех групп"""
+    def _plot_all_forecasts(self, max_groups=9, history_weeks=52):
+        """
+        Построение прогнозов на будущее для всех групп с отображением истории.
+
+        Args:
+            max_groups (int): Максимальное количество графиков для отображения.
+            history_weeks (int): Сколько недель истории показывать перед прогнозом.
+        """
         if not self.group_predictions or 'historical_sales' not in self.group_predictions[0]:
             print("Нет данных прогнозов. Запустите run_with_forecast() сначала")
             return
 
         n_groups = min(len(self.group_predictions), max_groups)
+        if n_groups == 0:
+            print("Нет групп для отображения")
+            return
+
+        # Настройка сетки графиков
         n_cols = 3
         n_rows = (n_groups + n_cols - 1) // n_cols
 
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 5 * n_rows))
-        axes = axes.flatten() if n_groups > 1 else [axes]
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, 5 * n_rows))
+
+        # Если график всего один, axes не будет массивом, превращаем в список
+        if n_groups == 1:
+            axes = [axes]
+        else:
+            axes = axes.flatten()
 
         for idx in range(n_groups):
             pred = self.group_predictions[idx]
             ax = axes[idx]
 
-            # Исторические данные (последние 52 недели = год)
-            hist_dates = pred['historical_dates'][-52:]
-            hist_sales = pred['historical_sales'][-52:]
+            # 1. Подготовка исторических данных
+            hist_dates = pred['historical_dates']
+            hist_sales = pred['historical_sales']
 
-            ax.plot(hist_dates, hist_sales, 'b-o', label='Исторические продажи', linewidth=2, markersize=4)
-            ax.plot(pred['forecast_dates'], pred['forecast_sales'], 'r--s', label='Прогноз', linewidth=2, markersize=6)
+            # Берем только последние N недель для чистоты графика,
+            # но если история короткая, берем всю
+            if len(hist_dates) > history_weeks:
+                hist_dates_plot = hist_dates[-history_weeks:]
+                hist_sales_plot = hist_sales[-history_weeks:]
+            else:
+                hist_dates_plot = hist_dates
+                hist_sales_plot = hist_sales
 
-            # Вертикальная линия разделения
-            split_date = pred['historical_dates'][-1]
-            ax.axvline(x=split_date, color='gray', linestyle='--', alpha=0.7, label='Начало прогноза')
+            # 2. Подготовка данных прогноза
+            forecast_dates = pred['forecast_dates']
+            forecast_sales = pred['forecast_sales']
 
-            ax.set_title(f"Клиент: {pred['client_code']}, SKU: {pred['sku_code']}")
-            ax.set_xlabel('Дата')
-            ax.set_ylabel('Продажи')
-            ax.legend(loc='best')
-            ax.grid(True, alpha=0.3)
+            # 3. Отрисовка
 
-            # Форматирование дат
+            # Исторические продажи (синяя сплошная линия)
+            ax.plot(hist_dates_plot, hist_sales_plot,
+                    color='#2c7fb8', linewidth=2.5, marker='o', markersize=4,
+                    label=f'Факт (последние {len(hist_dates_plot)} нед.)')
+
+            # Прогноз (красная пунктирная линия)
+            ax.plot(forecast_dates, forecast_sales,
+                    color='#fc8d59', linewidth=2.5, linestyle='--', marker='s', markersize=6,
+                    label='Прогноз')
+
+            # 4. Визуальные разделители
+
+            # Вертикальная линия на стыке истории и прогноза
+            split_date = hist_dates_plot[-1]
+            ax.axvline(x=split_date, color='gray', linestyle=':', linewidth=2, alpha=0.7)
+
+            # Заштрихованная область для периода прогноза (опционально, для красоты)
+            ax.axvspan(forecast_dates[0], forecast_dates[-1],
+                       color='#fc8d59', alpha=0.1, label=None)
+
+            # 5. Оформление
+            client_code = pred.get('client_code', 'N/A')
+            sku_code = pred.get('sku_code', 'N/A')
+
+            ax.set_title(f"Клиент: {client_code}\nSKU: {sku_code}", fontsize=12, pad=10)
+            ax.set_xlabel('Дата', fontsize=10)
+            ax.set_ylabel('Продажи (шт.)', fontsize=10)
+
+            # Легенда
+            ax.legend(loc='upper left', fontsize=9)
+            ax.grid(True, which='major', axis='y', linestyle='-', alpha=0.3)
+            ax.grid(True, which='minor', axis='x', linestyle=':', alpha=0.3)
+
+            # Форматирование оси X (даты)
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+            # Показываем каждый месяц или каждые 2 месяца в зависимости от длины
+            if len(hist_dates_plot) + len(forecast_dates) > 20:
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+            else:
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
 
-        # Скрыть лишние подграфики
+            plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')
+
+        # Скрыть лишние подграфики, если их меньше чем мест в сетке
         for idx in range(n_groups, len(axes)):
             axes[idx].set_visible(False)
 
-        plt.suptitle(f'{self.regression_name} - Прогноз продаж на 2.5 месяца', fontsize=14, fontweight='bold')
+        plt.suptitle(f'{self.regression_name} - Прогноз продаж на {len(forecast_dates)} недель',
+                     fontsize=16, fontweight='bold', y=1.02)
+
         plt.tight_layout()
         plt.show()
 
