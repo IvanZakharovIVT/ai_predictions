@@ -4,8 +4,7 @@ from hw_1.dataframe import DataframeInitiator
 from hw_1.sku_my import SKULiner, SKUForest, SKUXGB
 from hw_1.sku_base import compare_models
 
-if __name__ == '__main__':
-
+def main():
     print("=" * 60)
     print("ЧАСТЬ 0: Инициализация датафрейма")
     print("=" * 60)
@@ -26,6 +25,7 @@ if __name__ == '__main__':
     # my_linreg.run()
     my_forest.run()
     my_xgboost.run()
+    return
 
     # Построение графиков MAPE
     print("\n" + "=" * 60)
@@ -80,3 +80,7 @@ if __name__ == '__main__':
         best_model = my_xgboost
 
     best_model.run_with_forecast(forecast_weeks=10)  # 10 недель = 2.5 месяца
+
+
+if __name__ == '__main__':
+    main()
