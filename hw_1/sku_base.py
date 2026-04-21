@@ -4,7 +4,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from sklearn.metrics import mean_absolute_percentage_error
-from sklearn.model_selection import train_test_split
 
 
 class TooSmallDatasetError(Exception):

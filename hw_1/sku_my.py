@@ -3,6 +3,7 @@ import numpy as np
 from hw_1.sku_base import SkuBase
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
+from catboost import CatBoostRegressor
 import xgboost as xgb
 
 
@@ -66,3 +67,26 @@ class SKUXGB(SkuBase):
         y_pred_test = np.expm1(y_pred_log)
         # Продажи не могут быть отрицательными
         return np.maximum(y_pred_test, 0)
+
+
+class CatBoostModel(SkuBase):
+    regression_name = 'CatBoost Regressor'
+
+    def _fit_model(self, X_train, y_train, X_test):
+        model = CatBoostRegressor(
+            iterations=300,
+            learning_rate=0.05,
+            depth=6,
+            loss_function='MAPE',  # Важно! Оптимизируем сразу под MAPE
+            verbose=0,
+            random_seed=42
+        )
+        # Обработка случаев, когда y_train содержит нули (MAPE не любит нули в таргете при обучении)
+        # CatBoost сам обрабатывает это, но лучше заменить 0 на маленькое число если нужно
+        y_train_safe = np.where(y_train == 0, 0.001, y_train)
+
+        model.fit(X_train, y_train_safe)
+        predictions = model.predict(X_test)
+
+        # Прогноз не может быть отрицательным
+        return np.maximum(predictions, 0)
