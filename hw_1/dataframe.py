@@ -98,6 +98,15 @@ class DataframeInitiator:
 
         # Тренд (разница между текущим и прошлым лагом)
         df['trend_1'] = df[f'lag_1'] - df[f'lag_2']
+        df['stock_lag_1'] = df.groupby(group_cols)['СрДнОстаток'].shift(1)
+        df['stock_lag_2'] = df.groupby(group_cols)['СрДнОстаток'].shift(2)
+
+        df['promo_price'] = df['is_promo'] * df['Price_Ratio']
+        df['promo_stock'] = df['is_promo'] * df['СрДнОстаток']
+        df['price_stock'] = df['Price_Ratio'] * df['СрДнОстаток']
+
+        df['sales_diff'] = df['lag_1'] - df['lag_2']
+        df['sales_growth'] = df['lag_1'] / (df['lag_2'] + 1)
 
         return df
 

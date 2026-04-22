@@ -168,7 +168,7 @@ class SkuBase:
         """Получение списка признаков"""
         feature_columns = [
             # базовые
-            'Week_Index',
+            # 'Week_Index',
             'СрЦенаЗаНеделю',
             'Catalog_Price',
             'Price_Ratio',
@@ -192,7 +192,16 @@ class SkuBase:
             'roll_std_4',
 
             # тренд
-            'trend_1'
+            'trend_1',
+
+            'stock_lag_1',
+            'stock_lag_2',
+            'promo_price',
+            'promo_stock',
+            'price_stock',
+
+            'sales_diff',
+            'sales_growth'
         ]
 
         # Добавляем one-hot закодированные колонки (если они есть)
