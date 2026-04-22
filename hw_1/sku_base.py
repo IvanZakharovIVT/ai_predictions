@@ -89,12 +89,12 @@ class SkuBase:
         self._plot_all_forecasts()
 
     def _init_train_test_set_with_dates(self, group):
-        group_with_features = self._create_features_for_group(group.copy())
-        feature_columns = self._add_time_series_features_proper(group_with_features)
+        group = group.sort_values('Year_Week')
+        feature_columns = self._add_time_series_features_proper(group)
 
-        X = group_with_features[feature_columns].values
-        y = group_with_features['Количество'].values
-        dates = group_with_features['Year_Week'].dt.start_time.values
+        X = group[feature_columns].values
+        y = group['Количество'].values
+        dates = group['Year_Week'].dt.start_time.values
 
         if len(X) <= 8:
             raise TooSmallDatasetError
@@ -109,34 +109,6 @@ class SkuBase:
         dates_test = dates[split_idx:]
 
         return X_train, X_test, y_train, y_test, dates_test
-
-    def _create_features_for_group(self, group):
-        """Создание временных признаков для конкретной группы"""
-        # Сортировка
-        group = group.sort_values('Year_Week')
-
-        target_col = 'Количество'
-
-        # Лаги
-        for lag in [1, 2, 4, 8]:
-            group[f'lag_{lag}'] = group[target_col].shift(lag)
-
-        # Скользящие средние
-        for window in [4, 8, 12]:
-            group[f'roll_mean_{window}'] = group[target_col].shift(1).rolling(window, min_periods=1).mean()
-
-        # Логарифмические признаки (важно для моделей!)
-        group['log_sales'] = np.log1p(group[target_col])
-        for lag in [1, 2, 4, 8]:
-            group[f'log_lag_{lag}'] = group['log_sales'].shift(lag)
-
-        # Скользящее стандартное отклонение
-        group['roll_std_4'] = group[target_col].shift(1).rolling(4, min_periods=1).std()
-
-        # Заполняем NaN
-        group = group.fillna(0)
-
-        return group
 
     def _prepare_full_data(self, group):
         """Подготовка всех данных для обучения"""
@@ -195,15 +167,32 @@ class SkuBase:
     def _add_time_series_features_proper(self, group):
         """Получение списка признаков"""
         feature_columns = [
+            # базовые
             'Week_Index',
             'СрЦенаЗаНеделю',
+            'Catalog_Price',
+            'Price_Ratio',
+            'Price_Diff',
             'is_promo',
             'СрДнОстаток',
+
+            # сезонность
             'Месяц',
             'Неделя_в_году',
+            'Month_sin',
+            'Month_cos',
+            'Week_sin',
+            'Week_cos',
+
+            # лаги
             'lag_1', 'lag_2', 'lag_4', 'lag_8',
+
+            # rolling
             'roll_mean_4', 'roll_mean_8', 'roll_mean_12',
-            'roll_std_4'
+            'roll_std_4',
+
+            # тренд
+            'trend_1'
         ]
 
         # Добавляем one-hot закодированные колонки (если они есть)

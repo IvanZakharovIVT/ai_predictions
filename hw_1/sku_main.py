@@ -27,7 +27,7 @@ def main():
     my_forest.run()
     my_xgboost.run()
     catboost.run()
-    # return
+    return
 
     # Построение графиков MAPE
     print("\n" + "=" * 60)

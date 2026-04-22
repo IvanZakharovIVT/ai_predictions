@@ -47,18 +47,14 @@ class SKUXGB(SkuBase):
 
     def _fit_model(self, X_train, y_train, X_test):
         model = xgb.XGBRegressor(
-            n_estimators=300,
+            n_estimators=500,
             learning_rate=0.03,
             max_depth=6,
-            # subsample=0.8,
-            # colsample_bytree=0.7,
-            # gamma=0.1,
-            # reg_alpha=0.1,
-            # reg_lambda=1.0,
-            # min_child_weight=3,
-            objective='reg:squarederror',
+            subsample=0.8,
+            colsample_bytree=0.8,
+            reg_alpha=0.1,
+            reg_lambda=1.0,
             random_state=42,
-            verbosity=0,
             n_jobs=-1
         )
         y_train_log = np.log1p(y_train)
@@ -74,12 +70,13 @@ class CatBoostModel(SkuBase):
 
     def _fit_model(self, X_train, y_train, X_test):
         model = CatBoostRegressor(
-            iterations=300,
-            learning_rate=0.05,
+            iterations=500,
+            learning_rate=0.03,
             depth=6,
-            loss_function='MAPE',  # Важно! Оптимизируем сразу под MAPE
-            verbose=0,
-            random_seed=42
+            loss_function='RMSE',
+            eval_metric='MAPE',
+            random_seed=42,
+            verbose=0
         )
         # Обработка случаев, когда y_train содержит нули (MAPE не любит нули в таргете при обучении)
         # CatBoost сам обрабатывает это, но лучше заменить 0 на маленькое число если нужно

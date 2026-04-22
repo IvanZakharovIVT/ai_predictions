@@ -2,3 +2,4 @@
 .idea
 /hw_1/ai_slop/*
 *.xlsx
+/hw_1/catboost_info/*

@@ -51,6 +51,11 @@ class DataframeInitiator:
             # Разница в цене (абсолютная)
             df_weekly['Price_Diff'] = df_weekly['СрЦенаЗаНеделю'] - df_weekly['Catalog_Price']
 
+            q_low = df_weekly['Количество'].quantile(0.01)
+            q_high = df_weekly['Количество'].quantile(0.99)
+
+            df_weekly['Количество'] = df_weekly['Количество'].clip(q_low, q_high)
+
         except Exception as e:
             print(f"Warning: Could not load price data. Error: {e}")
             df_weekly['Catalog_Price'] = df_weekly['СрЦенаЗаНеделю']
@@ -149,9 +154,9 @@ class DataframeInitiator:
         df_weekly = df_weekly.merge(df_stock_weekly, on=['Номенклатура Код', 'Year_Week'], how='left')
 
         # Заполнение остатков
-        median_val = df_weekly['СрДнОстаток'].median()
-        if pd.isna(median_val): median_val = 0
-        df_weekly['СрДнОстаток'] = df_weekly['СрДнОстаток'].fillna(median_val)
+        # median_val = df_weekly['СрДнОстаток'].median()
+        # if pd.isna(median_val): median_val = 0
+        # df_weekly['СрДнОстаток'] = df_weekly['СрДнОстаток'].fillna(median_val)
 
         # Справочники
         df_sku_info = pd.read_excel('Справочник_товаров.xlsx')
