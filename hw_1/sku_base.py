@@ -29,9 +29,10 @@ class SkuBase:
         self.group_predictions = []
 
         for name, group in groups:
+            # group = group[group['СрДнОстаток'] > 0]
             client_code, sku_code = name
 
-            if len(group) < 20:
+            if len(group) < 30:
                 continue
             try:
                 X_train, X_test, y_train, y_test, dates_test = self._init_train_test_set_with_dates(group)
@@ -168,7 +169,7 @@ class SkuBase:
         """Получение списка признаков"""
         feature_columns = [
             # базовые
-            # 'Week_Index',
+            'Week_Index',
             'СрЦенаЗаНеделю',
             'Catalog_Price',
             'Price_Ratio',
@@ -185,14 +186,14 @@ class SkuBase:
             'Week_cos',
 
             # лаги
-            'lag_1', 'lag_2', 'lag_4', 'lag_8',
+            # 'lag_1', 'lag_2', 'lag_4', 'lag_8',
 
             # rolling
             'roll_mean_4', 'roll_mean_8', 'roll_mean_12',
             'roll_std_4',
 
             # тренд
-            'trend_1',
+            # 'trend_1',
 
             'stock_lag_1',
             'stock_lag_2',
@@ -201,7 +202,10 @@ class SkuBase:
             'price_stock',
 
             'sales_diff',
-            'sales_growth'
+            'sales_growth',
+
+            'is_stockout',
+            'stock_missing'
         ]
 
         # Добавляем one-hot закодированные колонки (если они есть)

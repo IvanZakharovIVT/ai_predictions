@@ -82,7 +82,7 @@ class CatBoostModel(SkuBase):
         # CatBoost сам обрабатывает это, но лучше заменить 0 на маленькое число если нужно
         y_train_safe = np.where(y_train == 0, 0.001, y_train)
 
-        model.fit(X_train, y_train_safe)
+        model.fit(X_train, y_train_safe, verbose=0)
         predictions = model.predict(X_test)
 
         # Прогноз не может быть отрицательным

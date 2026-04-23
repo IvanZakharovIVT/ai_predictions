@@ -17,8 +17,17 @@ class DataframeInitiator:
         df_weekly = self._add_time_series_features(df_weekly)
 
         # 4. Чистка числовых данных
+        df_weekly['stock_missing'] = df_weekly['СрДнОстаток'].isna().astype(int)
+
+        df_weekly['СрДнОстаток'] = df_weekly.groupby('Номенклатура Код')['СрДнОстаток'] \
+            .transform(lambda x: x.ffill().bfill())
+
+        df_weekly['СрДнОстаток'] = df_weekly['СрДнОстаток'].fillna(0)
+
+        # 2. Остальные числовые
         numeric_cols = df_weekly.select_dtypes(include=[np.number]).columns
-        # Заполняем NaN нулями, но осторожно с Price_Ratio (там уже была обработка inf)
+        numeric_cols = [c for c in numeric_cols if c != 'СрДнОстаток']
+
         df_weekly[numeric_cols] = df_weekly[numeric_cols].fillna(0)
 
         # Опционально: Удаление строк с нулевыми продажами из обучающей выборки
