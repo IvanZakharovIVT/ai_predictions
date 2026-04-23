@@ -26,10 +26,10 @@ class SKUForest(SkuBase):
 
     def _fit_model(self, X_train, y_train, X_test):
         rf_model = RandomForestRegressor(
-            n_estimators=500,
-            max_depth=20,
+            n_estimators=200,
+            max_depth=10,
             min_samples_split=2,
-            min_samples_leaf=1,
+            min_samples_leaf=5,
             max_features='sqrt',
             random_state=42,
             n_jobs=-1
@@ -47,7 +47,7 @@ class SKUXGB(SkuBase):
 
     def _fit_model(self, X_train, y_train, X_test):
         model = xgb.XGBRegressor(
-            n_estimators=500,
+            n_estimators=200,
             learning_rate=0.03,
             max_depth=6,
             subsample=0.8,
@@ -70,7 +70,7 @@ class CatBoostModel(SkuBase):
 
     def _fit_model(self, X_train, y_train, X_test):
         model = CatBoostRegressor(
-            iterations=500,
+            iterations=200,
             learning_rate=0.03,
             depth=6,
             loss_function='RMSE',
